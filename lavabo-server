@@ -46,6 +46,15 @@ parser_interact.add_argument('--devices-conf-dir', default="/etc/lava-dispatcher
 def list_devices():
     return sorted(devices.keys())
 
+def version():
+    try:
+        admin =  proxy.dashboard.version()
+    except xmlrpclib.Fault as e:
+        return json.dumps(utils.create_json("error", "XMLRPC err%d: %s" % (e.faultCode, e.faultString)))
+
+    return utils.create_answer("success", admin)
+
+
 def get_status(db_cursor, device_name):
     if not device_name in devices:
         return utils.create_answer("error", "Device does not exist.")
@@ -264,6 +273,8 @@ def handle(data, stdout):
         elif "power-off" in data:
             if "board" in data["power-off"]:
                 ans = power_off(db_cursor, user, data["power-off"]["board"])
+        elif "version" in data:
+            ans = version()
         else:
             ans = utils.create_answer("error", "Unknown command.")
         os.write(stdout, ans+"\n")
