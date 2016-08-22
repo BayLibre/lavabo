@@ -55,4 +55,10 @@ class Device(object):
         return subprocess.call(self.off_command.split(), stdout=open(devnull, 'wb'))
 
     def get_serial_port(self):
-        return self.serial_command.split()[2]
+        if self.get_serial_tool() == 'telnet':
+            return self.serial_command.split()[2]
+        elif self.get_serial_tool() == 'conmux-console':
+            return self.serial_command.split()[1]
+
+    def get_serial_tool(self):
+        return self.serial_command.split()[0]

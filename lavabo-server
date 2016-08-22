@@ -87,7 +87,7 @@ def get_serial(db_cursor, user, device_name):
             return utils.create_answer("error", "You have to reserve the device.")
         if made_by != user:
             return utils.create_answer("error", "Device reserved by %s and lastly used %s." % (made_by, time.ctime(last_use)))
-        return utils.create_answer("success", {"port": int(devices[device_name].get_serial_port())})
+        return utils.create_answer("success", {"tool": devices[device_name].get_serial_tool() ,"port": devices[device_name].get_serial_port()})
     finally:
         utils.release_lock(lock)
 

@@ -179,12 +179,18 @@ else:
         sys.exit(1)
 
     if args.cmd == "serial" and answer["status"] == "success":
-        local_port = get_available_port()
-        ssh = subprocess.Popen(("ssh -N -L %d:localhost:%d %s@%s -p %d" % (local_port, answer["content"]["port"], user, hostname, port)).split())
+        if answer["content"]["tool"] == 'telnet':
+            local_port = get_available_port()
+            ssh = subprocess.Popen(("ssh -N -L %d:localhost:%d %s@%s -p %d" % (local_port, int(answer["content"]["port"]), user, hostname, port)).split())
+        elif answer["content"]["tool"] == 'conmux-console':
+            local_port = answer["content"]["port"]
         serial = None
         for i in range(0,5):
-            serial = pexpect.spawn("telnet localhost %d" % local_port)
-            index = serial.expect(["Connected to localhost.", "Connection refused", "Connection closed"])
+            if answer["content"]["tool"] == 'telnet':
+                serial = pexpect.spawn("telnet localhost %d" % local_port)
+            elif answer["content"]["tool"] == 'conmux-console':
+                serial = pexpect.spawn("conmux-console %s" % local_port)
+            index = serial.expect(["Connected to","Connected to localhost.", "Connection refused", "Connection closed"])
             if index == 0:
                 break
             serial.close()
@@ -198,7 +204,8 @@ else:
         else:
             print "error: Could not establish serial connection."
             sys.exit(1)
-        ssh.terminate()
+        if answer["content"]["tool"] == 'telnet':
+            ssh.terminate()
     else:
         if answer["status"] == "error":
             print "%s: %s" % (answer["status"], answer["content"])
