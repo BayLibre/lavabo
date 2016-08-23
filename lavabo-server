@@ -47,10 +47,20 @@ def list_devices():
     return sorted(devices.keys())
 
 def version():
+    admin={}
+
     try:
-        admin =  proxy.dashboard.version()
+        version =  proxy.dashboard.version()
     except xmlrpclib.Fault as e:
         return json.dumps(utils.create_json("error", "XMLRPC err%d: %s" % (e.faultCode, e.faultString)))
+
+    try:
+        methods =  proxy.system.listMethods()
+    except xmlrpclib.Fault as e:
+        return json.dumps(utils.create_json("error", "XMLRPC err%d: %s" % (e.faultCode, e.faultString)))
+
+    admin["version"]=version
+    admin["methods"]=methods
 
     return utils.create_answer("success", admin)
 
