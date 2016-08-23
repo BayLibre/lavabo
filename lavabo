@@ -29,6 +29,27 @@ import pexpect
 import time
 from ConfigParser import ConfigParser
 import argcomplete
+from argparse import RawTextHelpFormatter
+
+def send_message(cmd, user, hostname, port, board=None):
+    ssh = subprocess.Popen(("ssh %s@%s -p %d interact" % (user, hostname, port)).split(), stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+
+    if isinstance(cmd,str):
+        if cmd in ["list", "update", "version"]:
+            msg = json.dumps({cmd: ""})
+        else:
+            msg = json.dumps({cmd: {"board": board}})
+    else:
+        if cmd["subcmd"].keys()[0] in ["help","list"]:
+            msg = json.dumps({cmd["cmd"]: {cmd["subcmd"].keys()[0]: ""} })
+        else:
+            msg = json.dumps({cmd["cmd"]: {cmd["subcmd"].keys()[0]: {"arg":cmd["subcmd"].values()[0],"board":board}} })
+
+    ssh.stdin.write(msg)
+    ssh.stdin.flush()
+    answer = ssh.stdout.readline()
+    ssh.terminate()
+    return answer
 
 def board_completer(prefix, parsed_args, **kwargs):
     config_parser = ConfigParser()
@@ -47,6 +68,32 @@ def board_completer(prefix, parsed_args, **kwargs):
         sys.exit(1)
     return (board for board in answer["content"] if board.startswith(prefix))
 
+def get_api_methods():
+    conf_file=os.path.join(os.path.expanduser("~"), ".lavabo.conf")
+    args = sys.argv[1:]
+    for i in range(len(args)):
+        if args[i] in ['-c','--conf-file']:
+            conf_file = args[i+1]
+            break
+     
+    config_parser = ConfigParser()
+    config_parser.readfp(open(conf_file))
+        
+    hostname = config_parser.get("lavabo-server", "hostname")
+    user = config_parser.get("lavabo-server", "user")
+    port = config_parser.getint("lavabo-server", "port")
+    answer = send_message({"cmd": "method", "subcmd":{"help":""}}, user, hostname, port)
+    try:
+        answer = json.loads(answer)
+    except ValueError as e:
+        argcomplete.warn(e)
+        sys.exit(1)
+    if answer["status"] != "success":
+        argcomplete.warn("error: %s" % answer["content"])
+        sys.exit(1)
+    return answer["content"]
+
+
 parser = argparse.ArgumentParser(description="Client to connect to lavabo-server used to remote control boards in LAVA.")
 parser.add_argument("-c", "--conf-file", type=argparse.FileType("r"), default=os.path.join(os.path.expanduser("~"), ".lavabo.conf"), help="the location of lavaboconfiguration file. Default: $HOME/.lavabo.conf.")
 
@@ -54,6 +101,7 @@ subparsers = parser.add_subparsers(dest='cmd', help="subcommands help")
 
 parser_list = subparsers.add_parser("list", description="List all boards available in LAVA.", help="list available boards")
 parser_version = subparsers.add_parser("version", description="Give dashboard version.", help="give dashboard version")
+
 
 parser_power_off = subparsers.add_parser("power-off", description="Power board off.", help="power board off.")
 parser_power_off.add_argument("BOARD", nargs="?", default=os.environ.get("LAVABO_BOARD", None), help="hostname of the board to power off. If omitted, gotten from LAVABO_BOARD environment variable.").completer = board_completer
@@ -76,19 +124,18 @@ parser_status.add_argument("BOARD", nargs="?", default=os.environ.get("LAVABO_BO
 parser_upload = subparsers.add_parser("upload", description="Send files to lavabo-server.", help="send files to lavabo-server.")
 parser_upload.add_argument("FILES", nargs="+", help="full path of the files to send. You can rename the files after being uploaded by separating local filenames and remote filenames with a colon (:). e.g.: upload file1:file2 file2:file3 will upload file1 and file2 and respectively rename them file2 and file3 on lavabo-server.")
 
-def send_message(cmd, user, hostname, port, board=None):
-    ssh = subprocess.Popen(("ssh %s@%s -p %d interact" % (user, hostname, port)).split(), stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-
-    if cmd in ["list", "update"]:
-        msg = json.dumps({cmd: ""})
-    else:
-        msg = json.dumps({cmd: {"board": board}})
-
-    ssh.stdin.write(msg)
-    ssh.stdin.flush()
-    answer = ssh.stdout.readline()
-    ssh.terminate()
-    return answer
+parser_method = subparsers.add_parser("method", description="direct method operation", help="direct method operation")
+subparser_method = parser_method.add_subparsers(dest='subcmd', help="method subcommands help")
+subparser_method.add_parser("list", description="Give list of API methods.", help="Give list of API methods.")
+for m,h in get_api_methods().items():
+    tab_h=h.split('\n')
+    m_help=""
+    for i in range(len(tab_h)):
+        if tab_h[i] == "Description":
+            m_help = tab_h[i+2]
+            break
+    subparser_method_elem = subparser_method.add_parser(m, description=str("\r\n".join(tab_h)), help=m_help, formatter_class=RawTextHelpFormatter)
+    subparser_method_elem.add_argument("METHOD_ARGS", nargs="?", default="", help="")
 
 def get_available_port():
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -128,7 +175,7 @@ hostname = config_parser.get("lavabo-server", "hostname")
 user = config_parser.get("lavabo-server", "user")
 port = config_parser.getint("lavabo-server", "port")
 
-if args.cmd not in ["upload", "list", "version"] and args.BOARD is None:
+if args.cmd not in ["upload", "list", "version", "method"] and args.BOARD is None:
     print "No board specified. Please add board in LAVABO_BOARD environment variable or as an argument to the command."
     sys.exit(1)
 
@@ -172,7 +219,14 @@ if args.cmd == "upload":
     sftp_client.close()
     transport.close()
 else:
-    answer = send_message(args.cmd, user, hostname, port, args.BOARD if hasattr(args, "BOARD") else None)
+    if not args.subcmd:
+        answer = send_message(args.cmd, user, hostname, port, args.BOARD if hasattr(args, "BOARD") else None)
+    else:
+        if not hasattr(args, "METHOD_ARGS"):
+            answer = send_message({'cmd':args.cmd,'subcmd':{args.subcmd:""}}, user, hostname, port, args.BOARD if hasattr(args, "BOARD") else None)
+        else:
+            answer = send_message({'cmd':args.cmd,'subcmd':{args.subcmd:args.METHOD_ARGS}}, user, hostname, port, args.BOARD if hasattr(args, "BOARD") else None)
+ 
     try:
         answer = json.loads(answer)
     except ValueError as e:
@@ -219,3 +273,6 @@ else:
         elif args.cmd == "version":
             print "Api version is: %s\n" % str(content["version"])
             print "Api methods:\n   - %s" % "\n   - ".join(content["methods"])
+        elif args.cmd == "method":
+            if args.subcmd == "list":
+                print "Api methods:\n   - %s" % "\n   - ".join(content)

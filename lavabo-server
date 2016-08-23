@@ -64,6 +64,22 @@ def version():
 
     return utils.create_answer("success", admin)
 
+def method(data):
+    method={}
+    try:
+        methods =  proxy.system.listMethods()
+    except xmlrpclib.Fault as e:
+        return json.dumps(utils.create_json("error", "XMLRPC err%d: %s" % (e.faultCode, e.faultString)))
+
+    if "help" in data["method"]:
+        for m in methods:
+            method[m]=proxy.system.methodHelp(m)
+    elif "list" in data["method"]:
+        method=methods
+
+
+    return utils.create_answer("success", method)
+
 
 def get_status(db_cursor, device_name):
     if not device_name in devices:
@@ -285,6 +301,8 @@ def handle(data, stdout):
                 ans = power_off(db_cursor, user, data["power-off"]["board"])
         elif "version" in data:
             ans = version()
+        elif "method" in data:
+            ans = method(data)
         else:
             ans = utils.create_answer("error", "Unknown command.")
         os.write(stdout, ans+"\n")
