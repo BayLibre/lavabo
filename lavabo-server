@@ -29,6 +29,8 @@ import sys
 import fcntl
 import utils
 
+import pdb
+
 parser = argparse.ArgumentParser(description="Server to allow remote controlling of boards in LAVA.")
 parser.add_argument("LAVABO_USER", help="user to authenticate against in lavabo")
 
@@ -76,6 +78,17 @@ def method(data):
             method[m]=proxy.system.methodHelp(m)
     elif "list" in data["method"]:
         method=methods
+    else:
+        m = getattr(proxy,str(data['method'].keys()[0]))
+        if data['method'].values()[0].has_key('arg'):
+            args=data['method'].values()[0]['arg']
+            if args==None:
+                method = m()
+            else:
+                method = m(str(args))
+        else:
+            method = m()
+
 
 
     return utils.create_answer("success", method)

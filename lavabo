@@ -135,7 +135,7 @@ for m,h in get_api_methods().items():
             m_help = tab_h[i+2]
             break
     subparser_method_elem = subparser_method.add_parser(m, description=str("\r\n".join(tab_h)), help=m_help, formatter_class=RawTextHelpFormatter)
-    subparser_method_elem.add_argument("METHOD_ARGS", nargs="?", default="", help="")
+    subparser_method_elem.add_argument("METHOD_ARGS", nargs="?", default=None, help="")
 
 def get_available_port():
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -223,7 +223,7 @@ else:
         answer = send_message(args.cmd, user, hostname, port, args.BOARD if hasattr(args, "BOARD") else None)
     else:
         if not hasattr(args, "METHOD_ARGS"):
-            answer = send_message({'cmd':args.cmd,'subcmd':{args.subcmd:""}}, user, hostname, port, args.BOARD if hasattr(args, "BOARD") else None)
+            answer = send_message({'cmd':args.cmd,'subcmd':{args.subcmd:None}}, user, hostname, port, args.BOARD if hasattr(args, "BOARD") else None)
         else:
             answer = send_message({'cmd':args.cmd,'subcmd':{args.subcmd:args.METHOD_ARGS}}, user, hostname, port, args.BOARD if hasattr(args, "BOARD") else None)
  
@@ -276,3 +276,5 @@ else:
         elif args.cmd == "method":
             if args.subcmd == "list":
                 print "Api methods:\n   - %s" % "\n   - ".join(content)
+            else:
+                print content
