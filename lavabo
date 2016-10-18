@@ -30,6 +30,7 @@ import time
 from ConfigParser import ConfigParser
 import argcomplete
 from argparse import RawTextHelpFormatter
+from tabulate import tabulate
 
 def send_message(cmd, user, hostname, port, board=None):
     ssh = subprocess.Popen(("ssh %s@%s -p %d interact" % (user, hostname, port)).split(), stdin=subprocess.PIPE, stdout=subprocess.PIPE)
@@ -124,6 +125,9 @@ parser_status.add_argument("BOARD", nargs="?", default=os.environ.get("LAVABO_BO
 parser_upload = subparsers.add_parser("upload", description="Send files to lavabo-server.", help="send files to lavabo-server.")
 parser_upload.add_argument("FILES", nargs="+", help="full path of the files to send. You can rename the files after being uploaded by separating local filenames and remote filenames with a colon (:). e.g.: upload file1:file2 file2:file3 will upload file1 and file2 and respectively rename them file2 and file3 on lavabo-server.")
 
+parser_where = subparsers.add_parser("where", description="Locate board in lab.", help="locate board in lab.")
+parser_where.add_argument("BOARD", nargs="?", default=os.environ.get("LAVABO_BOARD", None), help="hostname of the board to locate. If omitted, gotten from LAVABO_BOARD environment variable.").completer = board_completer
+
 parser_method = subparsers.add_parser("method", description="direct method operation", help="direct method operation")
 subparser_method = parser_method.add_subparsers(dest='subcmd', help="method subcommands help")
 subparser_method.add_parser("list", description="Give list of API methods.", help="Give list of API methods.")
@@ -136,6 +140,7 @@ for m,h in get_api_methods().items():
             break
     subparser_method_elem = subparser_method.add_parser(m, description=str("\r\n".join(tab_h)), help=m_help, formatter_class=RawTextHelpFormatter)
     subparser_method_elem.add_argument("METHOD_ARGS", nargs="?", default=None, help="")
+
 
 def get_available_port():
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -176,105 +181,111 @@ user = config_parser.get("lavabo-server", "user")
 port = config_parser.getint("lavabo-server", "port")
 
 if args.cmd not in ["upload", "list", "version", "method"] and args.BOARD is None:
-    print "No board specified. Please add board in LAVABO_BOARD environment variable or as an argument to the command."
-    sys.exit(1)
+        print "No board specified. Please add board in LAVABO_BOARD environment variable or as an argument to the command."
+        sys.exit(1)
 
 if args.cmd == "upload":
-    hkey = get_hostkey()
-    transport = paramiko.Transport((hostname, port))
+        hkey = get_hostkey()
+        transport = paramiko.Transport((hostname, port))
 
-    # We must set _preferred_keys before calling start_client() otherwise
-    # there's a chance Paramiko won't negotiate the host key type we have
-    # in our local known_keys... And there's no way to set it properly.
-    if hkey is not None:
-        transport._preferred_keys = [hkey.get_name()]
+        # We must set _preferred_keys before calling start_client() otherwise
+        # there's a chance Paramiko won't negotiate the host key type we have
+        # in our local known_keys... And there's no way to set it properly.
+        if hkey is not None:
+            transport._preferred_keys = [hkey.get_name()]
 
-    transport.start_client()
+        transport.start_client()
 
-    # Host key checks
-    if hkey is not None:
-        rkey = transport.get_remote_server_key()
-        if rkey.get_name() != hkey.get_name() or rkey.asbytes() != hkey.asbytes():
-            print "ERROR: remote host identification has changed!"
+        # Host key checks
+        if hkey is not None:
+            rkey = transport.get_remote_server_key()
+            if rkey.get_name() != hkey.get_name() or rkey.asbytes() != hkey.asbytes():
+                print "ERROR: remote host identification has changed!"
+                sys.exit(1)
+
+        # We don't use the connect() method directly because it can't handle
+        # multiple keys from the SSH agent. It's also not possible to call it
+        # multiple time as a workaround because this genius calls start_client()
+        pkey_connect(transport)
+        if not transport.is_authenticated():
+            print "ERROR: Authentication failed."
+            transport.close()
             sys.exit(1)
 
-    # We don't use the connect() method directly because it can't handle
-    # multiple keys from the SSH agent. It's also not possible to call it
-    # multiple time as a workaround because this genius calls start_client()
-    pkey_connect(transport)
-    if not transport.is_authenticated():
-        print "ERROR: Authentication failed."
+        sftp_client = transport.open_sftp_client()
+
+        for upload in args.FILES:
+            paths = upload.split(":")
+            local_path = paths[0]
+            remote_file = os.path.basename(paths[1]) if len(paths) == 2 else os.path.basename(local_path)
+            sftp_client.put(local_path, remote_file)
+        print "File(s) successfully sent to lavabo-server."
+
+        sftp_client.close()
         transport.close()
-        sys.exit(1)
-
-    sftp_client = transport.open_sftp_client()
-
-    for upload in args.FILES:
-        paths = upload.split(":")
-        local_path = paths[0]
-        remote_file = os.path.basename(paths[1]) if len(paths) == 2 else os.path.basename(local_path)
-        sftp_client.put(local_path, remote_file)
-    print "File(s) successfully sent to lavabo-server."
-
-    sftp_client.close()
-    transport.close()
 else:
-    if not args.subcmd:
-        answer = send_message(args.cmd, user, hostname, port, args.BOARD if hasattr(args, "BOARD") else None)
-    else:
-        if not hasattr(args, "METHOD_ARGS"):
-            answer = send_message({'cmd':args.cmd,'subcmd':{args.subcmd:None}}, user, hostname, port, args.BOARD if hasattr(args, "BOARD") else None)
+        if not hasattr(args, 'subcmd'):
+            answer = send_message(args.cmd, user, hostname, port, args.BOARD if hasattr(args, "BOARD") else None)
         else:
-            answer = send_message({'cmd':args.cmd,'subcmd':{args.subcmd:args.METHOD_ARGS}}, user, hostname, port, args.BOARD if hasattr(args, "BOARD") else None)
- 
-    try:
-        answer = json.loads(answer)
-    except ValueError as e:
-        print e
-        sys.exit(1)
-
-    if args.cmd == "serial" and answer["status"] == "success":
-        if answer["content"]["tool"] == 'telnet':
-            local_port = get_available_port()
-            ssh = subprocess.Popen(("ssh -N -L %d:localhost:%d %s@%s -p %d" % (local_port, int(answer["content"]["port"]), user, hostname, port)).split())
-        elif answer["content"]["tool"] == 'conmux-console':
-            local_port = answer["content"]["port"]
-        serial = None
-        for i in range(0,5):
-            if answer["content"]["tool"] == 'telnet':
-                serial = pexpect.spawn("telnet localhost %d" % local_port)
-            elif answer["content"]["tool"] == 'conmux-console':
-                serial = pexpect.spawn("conmux-console %s" % local_port)
-            index = serial.expect(["Connected to","Connected to localhost.", "Connection refused", "Connection closed"])
-            if index == 0:
-                break
-            serial.close()
-            if i < 4:
-                print "Try %d to connect to serial failed. %d attempts remaining." % (i+1, 5-i-1)
-                time.sleep(2)
-        if serial.isalive():
-            print "You have now access to the serial of %s." % args.BOARD
-            serial.interact()
-            serial.close()
-        else:
-            print "error: Could not establish serial connection."
-            sys.exit(1)
-        if answer["content"]["tool"] == 'telnet':
-            ssh.terminate()
-    else:
-        if answer["status"] == "error":
-            print "%s: %s" % (answer["status"], answer["content"])
-            sys.exit(1)
-        content = answer["content"]
-        if args.cmd == "list":
-            print "\n".join(content)
-        elif args.cmd == "status":
-            print "%s is %s%s%s%s" % (content["hostname"], content["status"], (" job %d" % content["job"]) if content["job"] else "", (" by %s" % content["offline_by"]) if content["offline_by"] else "", (" since %s" % content["offline_since"]) if content["offline_since"] else "")
-        elif args.cmd == "version":
-            print "Api version is: %s\n" % str(content["version"])
-            print "Api methods:\n   - %s" % "\n   - ".join(content["methods"])
-        elif args.cmd == "method":
-            if args.subcmd == "list":
-                print "Api methods:\n   - %s" % "\n   - ".join(content)
+            if not hasattr(args, "METHOD_ARGS"):
+                answer = send_message({'cmd':args.cmd,'subcmd':{args.subcmd:None}}, user, hostname, port, args.BOARD if hasattr(args, "BOARD") else None)
             else:
-                print content
+                answer = send_message({'cmd':args.cmd,'subcmd':{args.subcmd:args.METHOD_ARGS}}, user, hostname, port, args.BOARD if hasattr(args, "BOARD") else None)
+ 
+        try:
+            answer = json.loads(answer)
+        except ValueError as e:
+            print e
+            sys.exit(1)
+
+        if args.cmd == "serial" and answer["status"] == "success":
+            if answer["content"]["tool"] == 'telnet':
+                local_port = get_available_port()
+                ssh = subprocess.Popen(("ssh -N -L %d:localhost:%d %s@%s -p %d" % (local_port, int(answer["content"]["port"]), user, hostname, port)).split())
+            elif answer["content"]["tool"] == 'conmux-console':
+                local_port = answer["content"]["port"]
+            serial = None
+            for i in range(0,5):
+                if answer["content"]["tool"] == 'telnet':
+                    serial = pexpect.spawn("telnet localhost %d" % local_port)
+                elif answer["content"]["tool"] == 'conmux-console':
+                    serial = pexpect.spawn("conmux-console %s" % local_port)
+                index = serial.expect(["Connected to","Connected to localhost.", "Connection refused", "Connection closed"])
+                if index == 0:
+                    break
+                serial.close()
+                if i < 4:
+                    print "Try %d to connect to serial failed. %d attempts remaining." % (i+1, 5-i-1)
+                    time.sleep(2)
+            if serial.isalive():
+                print "You have now access to the serial of %s." % args.BOARD
+                serial.interact()
+                serial.close()
+            else:
+                print "error: Could not establish serial connection."
+                sys.exit(1)
+            if answer["content"]["tool"] == 'telnet':
+                ssh.terminate()
+        else:
+            if answer["status"] == "error":
+                print "%s: %s" % (answer["status"], answer["content"])
+                sys.exit(1)
+            content = answer["content"]
+            if args.cmd == "list":
+                if isinstance(content, list) and all(isinstance(cont, basestring) for cont in content):
+                    print "\n".join(content)
+                else:
+                    print tabulate(content, headers="keys")
+            elif args.cmd == "status":
+                print "%s is %s%s%s%s" % (content["hostname"], content["status"], (" job %d" % content["job"]) if content["job"] else "", (" by %s" % content["offline_by"]) if content["offline_by"] else "", (" since %s" % content["offline_since"]) if content["offline_since"] else "")
+            elif args.cmd == "version":
+                print "Api version is: %s\n" % str(content["version"])
+                print "Api methods:\n   - %s" % "\n   - ".join(content["methods"])
+            elif args.cmd == "method":
+                if args.subcmd == "list":
+                    print "Api methods:\n   - %s" % "\n   - ".join(content)
+                else:
+                    print content
+            elif args.cmd == "where":
+                print "%s is located at %s port %s" % (args.BOARD, content["hostname"], content["port"])
+
