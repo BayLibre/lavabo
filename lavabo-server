@@ -49,8 +49,12 @@ def list_devices(db_cursor):
     for device in sorted(devices):
         ans = get_status(db_cursor, device)
         ans = json.loads(ans)
-        if ans["status"] != "success":
-            return sorted(devices.keys())
+        #if ans["status"] != "success":
+        if ans["status"] == "success":
+            ans["content"]["reason"]=None
+        else:
+            ans["content"]={"status":ans["status"],"job":None,"offline_since": None,"hostname":None,"offline_by":None,"reason":ans["content"]}
+            #return sorted(devices.keys())
         devices_status.append(ans["content"])
     return devices_status
 
