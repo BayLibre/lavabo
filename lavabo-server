@@ -28,8 +28,7 @@ import select
 import sys
 import fcntl
 import utils
-
-import pdb
+import xmlrpclib
 
 parser = argparse.ArgumentParser(description="Server to allow remote controlling of boards in LAVA.")
 parser.add_argument("LAVABO_USER", help="user to authenticate against in lavabo")
@@ -105,16 +104,19 @@ def method(data):
         method=methods
     else:
         m = getattr(proxy,str(data['method'].keys()[0]))
-        if data['method'].values()[0].has_key('arg'):
-            args=data['method'].values()[0]['arg']
-            if args==None:
-                method = m()
+
+        try:
+            if data['method'].values()[0].has_key('arg'):
+                args=data['method'].values()[0]['arg']
+                if args==None:
+                    method = m()
+                else:
+                    method = m(str(args))
             else:
-                method = m(str(args))
-        else:
-            method = m()
-
-
+                    method = m()
+        except xmlrpclib.Fault as e:
+            return json.dumps(utils.create_json("error", "XMLRPC err%d: %s" % (e.faultCode, e.faultString)))
+                
 
     return utils.create_answer("success", method)
 

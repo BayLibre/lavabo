@@ -33,6 +33,12 @@ Lavabo server needs a running LAVA instance, configured to access the board's
 serials with *ser2net* or *conmux*. The machine hosting Lavabo server should be accessible
 via SSH as all communications use this protocol.
 
+Lavabo need at least lava 2016.6
+To check what is your lava API version:
+```
+lavabo version
+```
+
 Lavabo client needs a few programs to be installed: *telnet*, *conmux*, *ssh*,
 *python-paramiko*, *python-argcomplete* for autocompletion, *python-tabulate*
 for pretty printing the result of `lavabo list`.
@@ -140,6 +146,30 @@ the board won't be used in the farm and by Kernel CI jobs.
 ```
 $ lavabo release
 ```
+
+### What other action can do lavabo?
+
+With this new developpment, lavabo is able to interact with any other LAVA API functions
+
+Get the list:
+```
+lavabo version
+```
+or
+```
+lavabo method --help
+```
+
+Get help on a specific API function (ex: system.getCapabilities):
+```
+./lavabo method system.getCapabilities --help
+```
+
+Execute an API function:
+```
+./lavabo method system.getCapabilities
+```
+
 
 ### How are files served to the board?
 
