@@ -19,7 +19,7 @@
 
 import StringIO
 import os
-from ConfigParser import ConfigParser
+import ConfigParser
 import device
 import sqlite3
 import json
@@ -31,30 +31,33 @@ import xmlrpclib
 
 def get_device_list(db_conn, devices_conf_dir):
     devices = {}
-    config_parser = ConfigParser()
 
     for conf_file in os.listdir(devices_conf_dir):
         if conf_file.startswith("."):
             continue
+        config_parser = ConfigParser.ConfigParser()
         conf = StringIO.StringIO()
         conf.write('[__main__]\n')
         conf.write(open(os.path.join(devices_conf_dir, conf_file)).read())
         conf.seek(0)
         config_parser.readfp(conf)
-        device_name = config_parser.get("__main__", "hostname")
-        reset_command = config_parser.get("__main__", "hard_reset_command")
-        off_command = config_parser.get("__main__", "power_off_cmd")
-        serial_command = config_parser.get("__main__", "connection_command")
-        devices[device_name] = device.Device(device_name, reset_command, off_command, serial_command)
-        db_cursor = db_conn.cursor()
         try:
-            db_cursor.execute("INSERT INTO devices VALUES (?)", (device_name,))
-            db_cursor.execute("INSERT INTO reservations VALUES (?, ?, ?, ?)", (device_name, 0, None, 0))
-            db_conn.commit()
-        except sqlite3.IntegrityError:
+            device_name = config_parser.get("__main__", "hostname")
+            reset_command = config_parser.get("__main__", "hard_reset_command")
+            off_command = config_parser.get("__main__", "power_off_cmd")
+            serial_command = config_parser.get("__main__", "connection_command")
+            devices[device_name] = device.Device(device_name, reset_command, off_command, serial_command)
+            db_cursor = db_conn.cursor()
+            try:
+                db_cursor.execute("INSERT INTO devices VALUES (?)", (device_name,))
+                db_cursor.execute("INSERT INTO reservations VALUES (?, ?, ?, ?)", (device_name, 0, None, 0))
+                db_conn.commit()
+            except sqlite3.IntegrityError:
+                pass
+            finally:
+                db_cursor.close()
+        except ConfigParser.NoOptionError:
             pass
-        finally:
-            db_cursor.close()
     return devices
 
 def create_json(status, content):
